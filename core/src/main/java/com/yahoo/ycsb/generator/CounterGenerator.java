@@ -18,6 +18,7 @@
 package com.yahoo.ycsb.generator;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Generates a sequence of integers 0, 1, ...

@@ -43,42 +43,52 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Vector;
-
+import java.util.logging.Logger;
 
 /**
- * The core benchmark scenario. Represents a set of clients doing simple CRUD operations. The
- * relative proportion of different kinds of operations, and other properties of the workload,
- * are controlled by parameters specified at runtime.
+ * The core benchmark scenario. Represents a set of clients doing simple CRUD
+ * operations. The relative proportion of different kinds of operations, and
+ * other properties of the workload, are controlled by parameters specified at
+ * runtime.
  *
  * Properties to control the client:
  * <UL>
  * <LI><b>fieldcount</b>: the number of fields in a record (default: 10)
  * <LI><b>fieldlength</b>: the size of each field (default: 100)
- * <LI><b>readallfields</b>: should reads read all fields (true) or just one (false) (default: true)
- * <LI><b>writeallfields</b>: should updates and read/modify/writes update all fields (true) or just
- * one (false) (default: false)
- * <LI><b>readproportion</b>: what proportion of operations should be reads (default: 0.95)
- * <LI><b>updateproportion</b>: what proportion of operations should be updates (default: 0.05)
- * <LI><b>insertproportion</b>: what proportion of operations should be inserts (default: 0)
- * <LI><b>scanproportion</b>: what proportion of operations should be scans (default: 0)
- * <LI><b>readmodifywriteproportion</b>: what proportion of operations should be read a record,
- * modify it, write it back (default: 0)
- * <LI><b>requestdistribution</b>: what distribution should be used to select the records to operate
- * on - uniform, zipfian, hotspot, sequential, exponential or latest (default: uniform)
- * <LI><b>maxscanlength</b>: for scans, what is the maximum number of records to scan (default: 1000)
- * <LI><b>scanlengthdistribution</b>: for scans, what distribution should be used to choose the
- * number of records to scan, for each scan, between 1 and maxscanlength (default: uniform)
- * <LI><b>insertstart</b>: for parallel loads and runs, defines the starting record for this
- * YCSB instance (default: 0)
- * <LI><b>insertcount</b>: for parallel loads and runs, defines the number of records for this
- * YCSB instance (default: recordcount)
- * <LI><b>zeropadding</b>: for generating a record sequence compatible with string sort order by
- * 0 padding the record number. Controls the number of 0s to use for padding. (default: 1)
- * For example for row 5, with zeropadding=1 you get 'user5' key and with zeropading=8 you get
- * 'user00000005' key. In order to see its impact, zeropadding needs to be bigger than number of 
- * digits in the record number.
- * <LI><b>insertorder</b>: should records be inserted in order by key ("ordered"), or in hashed
- * order ("hashed") (default: hashed)
+ * <LI><b>readallfields</b>: should reads read all fields (true) or just one
+ * (false) (default: true)
+ * <LI><b>writeallfields</b>: should updates and read/modify/writes update all
+ * fields (true) or just one (false) (default: false)
+ * <LI><b>readproportion</b>: what proportion of operations should be reads
+ * (default: 0.95)
+ * <LI><b>updateproportion</b>: what proportion of operations should be updates
+ * (default: 0.05)
+ * <LI><b>insertproportion</b>: what proportion of operations should be inserts
+ * (default: 0)
+ * <LI><b>scanproportion</b>: what proportion of operations should be scans
+ * (default: 0)
+ * <LI><b>readmodifywriteproportion</b>: what proportion of operations should be
+ * read a record, modify it, write it back (default: 0)
+ * <LI><b>requestdistribution</b>: what distribution should be used to select
+ * the records to operate on - uniform, zipfian, hotspot, sequential,
+ * exponential or latest (default: uniform)
+ * <LI><b>maxscanlength</b>: for scans, what is the maximum number of records to
+ * scan (default: 1000)
+ * <LI><b>scanlengthdistribution</b>: for scans, what distribution should be
+ * used to choose the number of records to scan, for each scan, between 1 and
+ * maxscanlength (default: uniform)
+ * <LI><b>insertstart</b>: for parallel loads and runs, defines the starting
+ * record for this YCSB instance (default: 0)
+ * <LI><b>insertcount</b>: for parallel loads and runs, defines the number of
+ * records for this YCSB instance (default: recordcount)
+ * <LI><b>zeropadding</b>: for generating a record sequence compatible with
+ * string sort order by 0 padding the record number. Controls the number of 0s
+ * to use for padding. (default: 1) For example for row 5, with zeropadding=1
+ * you get 'user5' key and with zeropading=8 you get 'user00000005' key. In
+ * order to see its impact, zeropadding needs to be bigger than number of digits
+ * in the record number.
+ * <LI><b>insertorder</b>: should records be inserted in order by key
+ * ("ordered"), or in hashed order ("hashed") (default: hashed)
  * </ul>
  */
 public class CoreWorkload extends Workload {
@@ -94,7 +104,6 @@ public class CoreWorkload extends Workload {
 
   public static String table;
 
-
   /**
    * The name of the property for the number of fields in a record.
    */
@@ -107,15 +116,33 @@ public class CoreWorkload extends Workload {
 
   int fieldcount;
 
+  /**
+   * xc 20170515 字段名称属性
+   */
+  public static final String FIELD_NAME_PROPERTY = "fieldname";
+  public static final String FIELD_NAME_DEFAULT = ",";
+  public static String names;
+
   private List<String> fieldnames;
 
   /**
-   * The name of the property for the field length distribution. Options are "uniform", "zipfian"
-   * (favouring short records), "constant", and "histogram".
+   * xc 20170530 新增 customLength，用户自定义长度 指定该字段时，fieldname的格式如下
+   * fieldname=<name1.fieldlength1>,<name2.fieldlength2>,...,<namek,fieldlengthk>
+   */
+  public static final String FIELD_CUSTOM_LENGTH = "customfieldlength";
+  public static final String FIELD_CUSTOM_LENGTH_DEFAULT = "false";
+  public static boolean customfiledlength = false;
+  private HashMap<String, Integer> fieldMap;
+
+  /**
+   * The name of the property for the field length distribution. Options are
+   * "uniform", "zipfian" (favouring short records), "constant", and
+   * "histogram".
    *
-   * If "uniform", "zipfian" or "constant", the maximum field length will be that specified by the
-   * fieldlength property. If "histogram", then the histogram will be read from the filename
-   * specified in the "fieldlengthhistogram" property.
+   * If "uniform", "zipfian" or "constant", the maximum field length will be
+   * that specified by the fieldlength property. If "histogram", then the
+   * histogram will be read from the filename specified in the
+   * "fieldlengthhistogram" property.
    */
   public static final String FIELD_LENGTH_DISTRIBUTION_PROPERTY = "fieldlengthdistribution";
 
@@ -135,8 +162,8 @@ public class CoreWorkload extends Workload {
   public static final String FIELD_LENGTH_PROPERTY_DEFAULT = "100";
 
   /**
-   * The name of a property that specifies the filename containing the field length histogram (only
-   * used if fieldlengthdistribution is "histogram").
+   * The name of a property that specifies the filename containing the field
+   * length histogram (only used if fieldlengthdistribution is "histogram").
    */
   public static final String FIELD_LENGTH_HISTOGRAM_FILE_PROPERTY = "fieldlengthhistogram";
 
@@ -146,14 +173,14 @@ public class CoreWorkload extends Workload {
   public static final String FIELD_LENGTH_HISTOGRAM_FILE_PROPERTY_DEFAULT = "hist.txt";
 
   /**
-   * Generator object that produces field lengths.  The value of this depends on the properties that
-   * start with "FIELD_LENGTH_".
+   * Generator object that produces field lengths. The value of this depends on
+   * the properties that start with "FIELD_LENGTH_".
    */
   NumberGenerator fieldlengthgenerator;
 
   /**
-   * The name of the property for deciding whether to read one field (false) or all fields (true) of
-   * a record.
+   * The name of the property for deciding whether to read one field (false) or
+   * all fields (true) of a record.
    */
   public static final String READ_ALL_FIELDS_PROPERTY = "readallfields";
 
@@ -165,8 +192,8 @@ public class CoreWorkload extends Workload {
   boolean readallfields;
 
   /**
-   * The name of the property for deciding whether to write one field (false) or all fields (true)
-   * of a record.
+   * The name of the property for deciding whether to write one field (false) or
+   * all fields (true) of a record.
    */
   public static final String WRITE_ALL_FIELDS_PROPERTY = "writeallfields";
 
@@ -177,10 +204,9 @@ public class CoreWorkload extends Workload {
 
   boolean writeallfields;
 
-
   /**
-   * The name of the property for deciding whether to check all returned
-   * data against the formation template to ensure data integrity.
+   * The name of the property for deciding whether to check all returned data
+   * against the formation template to ensure data integrity.
    */
   public static final String DATA_INTEGRITY_PROPERTY = "dataintegrity";
 
@@ -190,8 +216,8 @@ public class CoreWorkload extends Workload {
   public static final String DATA_INTEGRITY_PROPERTY_DEFAULT = "false";
 
   /**
-   * Set to true if want to check correctness of reads. Must also
-   * be set to true during loading phase to function.
+   * Set to true if want to check correctness of reads. Must also be set to true
+   * during loading phase to function.
    */
   private boolean dataintegrity;
 
@@ -206,7 +232,8 @@ public class CoreWorkload extends Workload {
   public static final String READ_PROPORTION_PROPERTY_DEFAULT = "0.95";
 
   /**
-   * The name of the property for the proportion of transactions that are updates.
+   * The name of the property for the proportion of transactions that are
+   * updates.
    */
   public static final String UPDATE_PROPORTION_PROPERTY = "updateproportion";
 
@@ -216,7 +243,8 @@ public class CoreWorkload extends Workload {
   public static final String UPDATE_PROPORTION_PROPERTY_DEFAULT = "0.05";
 
   /**
-   * The name of the property for the proportion of transactions that are inserts.
+   * The name of the property for the proportion of transactions that are
+   * inserts.
    */
   public static final String INSERT_PROPORTION_PROPERTY = "insertproportion";
 
@@ -236,7 +264,8 @@ public class CoreWorkload extends Workload {
   public static final String SCAN_PROPORTION_PROPERTY_DEFAULT = "0.0";
 
   /**
-   * The name of the property for the proportion of transactions that are read-modify-write.
+   * The name of the property for the proportion of transactions that are
+   * read-modify-write.
    */
   public static final String READMODIFYWRITE_PROPORTION_PROPERTY = "readmodifywriteproportion";
 
@@ -246,8 +275,8 @@ public class CoreWorkload extends Workload {
   public static final String READMODIFYWRITE_PROPORTION_PROPERTY_DEFAULT = "0.0";
 
   /**
-   * The name of the property for the the distribution of requests across the keyspace. Options are
-   * "uniform", "zipfian" and "latest"
+   * The name of the property for the the distribution of requests across the
+   * keyspace. Options are "uniform", "zipfian" and "latest"
    */
   public static final String REQUEST_DISTRIBUTION_PROPERTY = "requestdistribution";
 
@@ -256,9 +285,9 @@ public class CoreWorkload extends Workload {
    */
   public static final String REQUEST_DISTRIBUTION_PROPERTY_DEFAULT = "uniform";
 
-   /**
-   * The name of the property for adding zero padding to record numbers in order to match
-   * string sort order. Controls the number of 0s to left pad with.
+  /**
+   * The name of the property for adding zero padding to record numbers in order
+   * to match string sort order. Controls the number of 0s to left pad with.
    */
   public static final String ZERO_PADDING_PROPERTY = "zeropadding";
 
@@ -267,7 +296,6 @@ public class CoreWorkload extends Workload {
    */
   public static final String ZERO_PADDING_PROPERTY_DEFAULT = "1";
 
-  
   /**
    * The name of the property for the max scan length (number of records).
    */
@@ -279,8 +307,8 @@ public class CoreWorkload extends Workload {
   public static final String MAX_SCAN_LENGTH_PROPERTY_DEFAULT = "1000";
 
   /**
-   * The name of the property for the scan length distribution. Options are "uniform" and "zipfian"
-   * (favoring short scans)
+   * The name of the property for the scan length distribution. Options are
+   * "uniform" and "zipfian" (favoring short scans)
    */
   public static final String SCAN_LENGTH_DISTRIBUTION_PROPERTY = "scanlengthdistribution";
 
@@ -290,7 +318,8 @@ public class CoreWorkload extends Workload {
   public static final String SCAN_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT = "uniform";
 
   /**
-   * The name of the property for the order to insert records. Options are "ordered" or "hashed"
+   * The name of the property for the order to insert records. Options are
+   * "ordered" or "hashed"
    */
   public static final String INSERT_ORDER_PROPERTY = "insertorder";
 
@@ -298,6 +327,16 @@ public class CoreWorkload extends Workload {
    * Default insert order.
    */
   public static final String INSERT_ORDER_PROPERTY_DEFAULT = "hashed";
+
+  /**
+   * xc 20170516 insertorder 增加 orderint 选项，表示顺序生成 _id int 数值
+   */
+  public boolean orderint = false;
+
+  /**
+   * xc 20170516 insertorder 增加 random 选项，表示随机生成 _id int 数值
+   */
+  public boolean randominsert = false;
 
   /**
    * Percentage data items that constitute the hot set.
@@ -355,12 +394,11 @@ public class CoreWorkload extends Workload {
 
   protected static NumberGenerator getFieldLengthGenerator(Properties p) throws WorkloadException {
     NumberGenerator fieldlengthgenerator;
-    String fieldlengthdistribution = p.getProperty(
-        FIELD_LENGTH_DISTRIBUTION_PROPERTY, FIELD_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT);
-    int fieldlength =
-        Integer.parseInt(p.getProperty(FIELD_LENGTH_PROPERTY, FIELD_LENGTH_PROPERTY_DEFAULT));
-    String fieldlengthhistogram = p.getProperty(
-        FIELD_LENGTH_HISTOGRAM_FILE_PROPERTY, FIELD_LENGTH_HISTOGRAM_FILE_PROPERTY_DEFAULT);
+    String fieldlengthdistribution = p.getProperty(FIELD_LENGTH_DISTRIBUTION_PROPERTY,
+        FIELD_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT);
+    int fieldlength = Integer.parseInt(p.getProperty(FIELD_LENGTH_PROPERTY, FIELD_LENGTH_PROPERTY_DEFAULT));
+    String fieldlengthhistogram = p.getProperty(FIELD_LENGTH_HISTOGRAM_FILE_PROPERTY,
+        FIELD_LENGTH_HISTOGRAM_FILE_PROPERTY_DEFAULT);
     if (fieldlengthdistribution.compareTo("constant") == 0) {
       fieldlengthgenerator = new ConstantIntegerGenerator(fieldlength);
     } else if (fieldlengthdistribution.compareTo("uniform") == 0) {
@@ -371,70 +409,109 @@ public class CoreWorkload extends Workload {
       try {
         fieldlengthgenerator = new HistogramGenerator(fieldlengthhistogram);
       } catch (IOException e) {
-        throw new WorkloadException(
-            "Couldn't read field length histogram file: " + fieldlengthhistogram, e);
+        throw new WorkloadException("Couldn't read field length histogram file: " + fieldlengthhistogram, e);
       }
     } else {
-      throw new WorkloadException(
-          "Unknown field length distribution \"" + fieldlengthdistribution + "\"");
+      throw new WorkloadException("Unknown field length distribution \"" + fieldlengthdistribution + "\"");
     }
     return fieldlengthgenerator;
   }
 
   /**
-   * Initialize the scenario.
-   * Called once, in the main client thread, before any operations are started.
+   * Initialize the scenario. Called once, in the main client thread, before any
+   * operations are started.
    */
   @Override
   public void init(Properties p) throws WorkloadException {
-	  /* xc 2017-5-11 配置信息初始化 */
+    /* xc 2017-5-11 配置信息初始化 */
     table = p.getProperty(TABLENAME_PROPERTY, TABLENAME_PROPERTY_DEFAULT);
 
-    fieldcount =
-        Integer.parseInt(p.getProperty(FIELD_COUNT_PROPERTY, FIELD_COUNT_PROPERTY_DEFAULT));
+    fieldcount = Integer.parseInt(p.getProperty(FIELD_COUNT_PROPERTY, FIELD_COUNT_PROPERTY_DEFAULT));
     fieldnames = new ArrayList<String>();
-    for (int i = 0; i < fieldcount; i++) {
-      fieldnames.add("field" + i);
+
+    /* xc 20170530 解析customlength */
+    customfiledlength = Boolean.parseBoolean(p.getProperty(FIELD_CUSTOM_LENGTH, FIELD_CUSTOM_LENGTH_DEFAULT));
+
+    /* xc 20170515 解析字段名称属性 */
+    names = p.getProperty(FIELD_NAME_PROPERTY, FIELD_NAME_DEFAULT);
+    System.out.println("\n" + names);    
+    String[] nameArr = names.split(",");
+
+    /* xc 20170515 如果设置了名字属性，就屏蔽 fieldcount 属性 */
+    if (nameArr.length != 0) {
+      fieldcount = nameArr.length;
+
+      if (customfiledlength) {
+        fieldMap = new HashMap<>();
+        
+        for (int i = 0; i < nameArr.length; i++) {
+          if (nameArr[i].charAt(0) != '<' && nameArr[i].charAt(nameArr[i].length() - 1) != '>') {
+            System.err.println("customfiledlength = true, fieldnames format is wrong.");
+            System.exit(1);
+          }
+          
+          System.out.println(nameArr[i]);
+          String sub = nameArr[i].substring(1, nameArr[i].length() - 1);
+          System.out.println(sub);
+          String[] subArr = sub.split("\\.");
+          
+          /* xc 20170530 检查重复命名 */
+          if (fieldMap.containsKey(subArr[0])) {
+            System.err.println("duplicate field name");
+            System.exit(1);
+          }
+          
+          fieldMap.put(subArr[0], Integer.parseInt(subArr[1]));
+          fieldnames.add(subArr[0]);
+        }
+      } else {
+        /* xc 20170530 不检查重复，需用户负责 */
+        for (int i = 0; i < nameArr.length; i++) {
+          if (nameArr[i].charAt(0) == '<' && nameArr[i].charAt(nameArr[i].length() - 1) == '>') {
+            System.err.println("may be set \"customfiledlength=true\" can meet your need when you want to indicate each field length.");
+            System.exit(1);
+          }
+          
+          fieldnames.add(nameArr[i]);
+        }
+      }
+    } else {      
+      for (int i = 0; i < fieldcount; i++) {
+        fieldnames.add("field" + i);
+      }
     }
+
     fieldlengthgenerator = CoreWorkload.getFieldLengthGenerator(p);
-    
-    recordcount =
-        Integer.parseInt(p.getProperty(Client.RECORD_COUNT_PROPERTY, Client.DEFAULT_RECORD_COUNT));
+
+    recordcount = Integer.parseInt(p.getProperty(Client.RECORD_COUNT_PROPERTY, Client.DEFAULT_RECORD_COUNT));
     if (recordcount == 0) {
       recordcount = Integer.MAX_VALUE;
     }
-    String requestdistrib =
-        p.getProperty(REQUEST_DISTRIBUTION_PROPERTY, REQUEST_DISTRIBUTION_PROPERTY_DEFAULT);
-    int maxscanlength =
-        Integer.parseInt(p.getProperty(MAX_SCAN_LENGTH_PROPERTY, MAX_SCAN_LENGTH_PROPERTY_DEFAULT));
-    String scanlengthdistrib =
-        p.getProperty(SCAN_LENGTH_DISTRIBUTION_PROPERTY, SCAN_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT);
+    String requestdistrib = p.getProperty(REQUEST_DISTRIBUTION_PROPERTY, REQUEST_DISTRIBUTION_PROPERTY_DEFAULT);
+    int maxscanlength = Integer.parseInt(p.getProperty(MAX_SCAN_LENGTH_PROPERTY, MAX_SCAN_LENGTH_PROPERTY_DEFAULT));
+    String scanlengthdistrib = p.getProperty(SCAN_LENGTH_DISTRIBUTION_PROPERTY,
+        SCAN_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT);
 
-    int insertstart =
-        Integer.parseInt(p.getProperty(INSERT_START_PROPERTY, INSERT_START_PROPERTY_DEFAULT));
-    int insertcount =
-        Integer.parseInt(p.getProperty(INSERT_COUNT_PROPERTY, String.valueOf(recordcount - insertstart)));
-    // Confirm valid values for insertstart and insertcount in relation to recordcount
+    int insertstart = Integer.parseInt(p.getProperty(INSERT_START_PROPERTY, INSERT_START_PROPERTY_DEFAULT));
+    int insertcount = Integer.parseInt(p.getProperty(INSERT_COUNT_PROPERTY, String.valueOf(recordcount - insertstart)));
+    // Confirm valid values for insertstart and insertcount in relation to
+    // recordcount
     if (recordcount < (insertstart + insertcount)) {
       System.err.println("Invalid combination of insertstart, insertcount and recordcount.");
       System.err.println("recordcount must be bigger than insertstart + insertcount.");
       System.exit(-1);
     }
-    zeropadding =
-        Integer.parseInt(p.getProperty(ZERO_PADDING_PROPERTY, ZERO_PADDING_PROPERTY_DEFAULT));
+    zeropadding = Integer.parseInt(p.getProperty(ZERO_PADDING_PROPERTY, ZERO_PADDING_PROPERTY_DEFAULT));
 
-    readallfields = Boolean.parseBoolean(
-        p.getProperty(READ_ALL_FIELDS_PROPERTY, READ_ALL_FIELDS_PROPERTY_DEFAULT));
-    writeallfields = Boolean.parseBoolean(
-        p.getProperty(WRITE_ALL_FIELDS_PROPERTY, WRITE_ALL_FIELDS_PROPERTY_DEFAULT));
+    readallfields = Boolean.parseBoolean(p.getProperty(READ_ALL_FIELDS_PROPERTY, READ_ALL_FIELDS_PROPERTY_DEFAULT));
+    writeallfields = Boolean.parseBoolean(p.getProperty(WRITE_ALL_FIELDS_PROPERTY, WRITE_ALL_FIELDS_PROPERTY_DEFAULT));
 
-    dataintegrity = Boolean.parseBoolean(
-        p.getProperty(DATA_INTEGRITY_PROPERTY, DATA_INTEGRITY_PROPERTY_DEFAULT));
+    dataintegrity = Boolean.parseBoolean(p.getProperty(DATA_INTEGRITY_PROPERTY, DATA_INTEGRITY_PROPERTY_DEFAULT));
     // Confirm that fieldlengthgenerator returns a constant if data
     // integrity check requested.
-    if (dataintegrity && !(p.getProperty(
-          FIELD_LENGTH_DISTRIBUTION_PROPERTY,
-          FIELD_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT)).equals("constant")) {
+    if (dataintegrity
+        && !(p.getProperty(FIELD_LENGTH_DISTRIBUTION_PROPERTY, FIELD_LENGTH_DISTRIBUTION_PROPERTY_DEFAULT))
+            .equals("constant")) {
       System.err.println("Must have constant field size to check data integrity.");
       System.exit(-1);
     }
@@ -442,13 +519,17 @@ public class CoreWorkload extends Workload {
     if (p.getProperty(INSERT_ORDER_PROPERTY, INSERT_ORDER_PROPERTY_DEFAULT).compareTo("hashed") == 0) {
       orderedinserts = false;
     } else if (requestdistrib.compareTo("exponential") == 0) {
-      double percentile = Double.parseDouble(p.getProperty(
-          ExponentialGenerator.EXPONENTIAL_PERCENTILE_PROPERTY,
+      double percentile = Double.parseDouble(p.getProperty(ExponentialGenerator.EXPONENTIAL_PERCENTILE_PROPERTY,
           ExponentialGenerator.EXPONENTIAL_PERCENTILE_DEFAULT));
-      double frac = Double.parseDouble(p.getProperty(
-          ExponentialGenerator.EXPONENTIAL_FRAC_PROPERTY,
-          ExponentialGenerator.EXPONENTIAL_FRAC_DEFAULT));
+      double frac = Double.parseDouble(
+          p.getProperty(ExponentialGenerator.EXPONENTIAL_FRAC_PROPERTY, ExponentialGenerator.EXPONENTIAL_FRAC_DEFAULT));
       keychooser = new ExponentialGenerator(percentile, recordcount * frac);
+    } else if (p.getProperty(INSERT_ORDER_PROPERTY, INSERT_ORDER_PROPERTY_DEFAULT).compareTo("random") == 0) {
+      /* xc 20170516 */
+      randominsert = true;
+    } else if (p.getProperty(INSERT_ORDER_PROPERTY, INSERT_ORDER_PROPERTY_DEFAULT).compareTo("orderint") == 0) {
+      /* xc 20170516 */
+      orderint = true;
     } else {
       orderedinserts = true;
     }
@@ -461,31 +542,40 @@ public class CoreWorkload extends Workload {
       keychooser = new UniformIntegerGenerator(insertstart, insertstart + insertcount - 1);
     } else if (requestdistrib.compareTo("sequential") == 0) {
       keychooser = new SequentialGenerator(insertstart, insertstart + insertcount - 1);
-    }else if (requestdistrib.compareTo("zipfian") == 0) {
-      // it does this by generating a random "next key" in part by taking the modulus over the
+    } else if (requestdistrib.compareTo("zipfian") == 0) {
+      // it does this by generating a random "next key" in part by taking
+      // the modulus over the
       // number of keys.
-      // If the number of keys changes, this would shift the modulus, and we don't want that to
-      // change which keys are popular so we'll actually construct the scrambled zipfian generator
-      // with a keyspace that is larger than exists at the beginning of the test. that is, we'll predict
-      // the number of inserts, and tell the scrambled zipfian generator the number of existing keys
-      // plus the number of predicted keys as the total keyspace. then, if the generator picks a key
-      // that hasn't been inserted yet, will just ignore it and pick another key. this way, the size of
-      // the keyspace doesn't change from the perspective of the scrambled zipfian generator
-      final double insertproportion = Double.parseDouble(
-          p.getProperty(INSERT_PROPORTION_PROPERTY, INSERT_PROPORTION_PROPERTY_DEFAULT));
+      // If the number of keys changes, this would shift the modulus, and
+      // we don't want that to
+      // change which keys are popular so we'll actually construct the
+      // scrambled zipfian generator
+      // with a keyspace that is larger than exists at the beginning of
+      // the test. that is, we'll predict
+      // the number of inserts, and tell the scrambled zipfian generator
+      // the number of existing keys
+      // plus the number of predicted keys as the total keyspace. then, if
+      // the generator picks a key
+      // that hasn't been inserted yet, will just ignore it and pick
+      // another key. this way, the size of
+      // the keyspace doesn't change from the perspective of the scrambled
+      // zipfian generator
+      final double insertproportion = Double
+          .parseDouble(p.getProperty(INSERT_PROPORTION_PROPERTY, INSERT_PROPORTION_PROPERTY_DEFAULT));
       int opcount = Integer.parseInt(p.getProperty(Client.OPERATION_COUNT_PROPERTY));
-      int expectednewkeys = (int) ((opcount) * insertproportion * 2.0); // 2 is fudge factor
+      int expectednewkeys = (int) ((opcount) * insertproportion * 2.0); // 2
+      // is
+      // fudge
+      // factor
 
       keychooser = new ScrambledZipfianGenerator(insertstart, insertstart + insertcount + expectednewkeys);
     } else if (requestdistrib.compareTo("latest") == 0) {
       keychooser = new SkewedLatestGenerator(transactioninsertkeysequence);
     } else if (requestdistrib.equals("hotspot")) {
-      double hotsetfraction =
-          Double.parseDouble(p.getProperty(HOTSPOT_DATA_FRACTION, HOTSPOT_DATA_FRACTION_DEFAULT));
-      double hotopnfraction =
-          Double.parseDouble(p.getProperty(HOTSPOT_OPN_FRACTION, HOTSPOT_OPN_FRACTION_DEFAULT));
-      keychooser = new HotspotIntegerGenerator(insertstart, insertstart + insertcount - 1,
-          hotsetfraction, hotopnfraction);
+      double hotsetfraction = Double.parseDouble(p.getProperty(HOTSPOT_DATA_FRACTION, HOTSPOT_DATA_FRACTION_DEFAULT));
+      double hotopnfraction = Double.parseDouble(p.getProperty(HOTSPOT_OPN_FRACTION, HOTSPOT_OPN_FRACTION_DEFAULT));
+      keychooser = new HotspotIntegerGenerator(insertstart, insertstart + insertcount - 1, hotsetfraction,
+          hotopnfraction);
     } else {
       throw new WorkloadException("Unknown request distribution \"" + requestdistrib + "\"");
     }
@@ -497,26 +587,36 @@ public class CoreWorkload extends Workload {
     } else if (scanlengthdistrib.compareTo("zipfian") == 0) {
       scanlength = new ZipfianGenerator(1, maxscanlength);
     } else {
-      throw new WorkloadException(
-          "Distribution \"" + scanlengthdistrib + "\" not allowed for scan length");
+      throw new WorkloadException("Distribution \"" + scanlengthdistrib + "\" not allowed for scan length");
     }
 
-    insertionRetryLimit = Integer.parseInt(p.getProperty(
-        INSERTION_RETRY_LIMIT, INSERTION_RETRY_LIMIT_DEFAULT));
-    insertionRetryInterval = Integer.parseInt(p.getProperty(
-        INSERTION_RETRY_INTERVAL, INSERTION_RETRY_INTERVAL_DEFAULT));
+    insertionRetryLimit = Integer.parseInt(p.getProperty(INSERTION_RETRY_LIMIT, INSERTION_RETRY_LIMIT_DEFAULT));
+    insertionRetryInterval = Integer
+        .parseInt(p.getProperty(INSERTION_RETRY_INTERVAL, INSERTION_RETRY_INTERVAL_DEFAULT));
   }
 
   public String buildKeyName(long keynum) {
-    if (!orderedinserts) {
+    /* xc 20170516 只有三者都不是才 hash 生成 key */
+    if (!orderedinserts && !orderint && !randominsert) {
       keynum = Utils.hash(keynum);
     }
+    
+    /* xc 20170530 */
+    if (randominsert)
+      keynum = Utils.FNVhash32((int)keynum);
+    
     String value = Long.toString(keynum);
+
+    /* 判断 _id 是否为 int， 如果是，那么 insertorder 必须为 random 或者 order */
+    if (randominsert || orderint)
+      return value;
+
     int fill = zeropadding - value.length();
     String prekey = "user";
-    for(int i=0; i<fill; i++) {
+    for (int i = 0; i < fill; i++) {
       prekey += '0';
     }
+
     return prekey + value;
   }
 
@@ -530,6 +630,9 @@ public class CoreWorkload extends Workload {
     ByteIterator data;
     if (dataintegrity) {
       data = new StringByteIterator(buildDeterministicValue(key, fieldkey));
+    } else if (customfiledlength) {
+      /* xc 20170530 */
+      data = new RandomByteIterator(fieldMap.get(fieldkey));
     } else {
       // fill with random data
       data = new RandomByteIterator(fieldlengthgenerator.nextValue().longValue());
@@ -549,6 +652,9 @@ public class CoreWorkload extends Workload {
       ByteIterator data;
       if (dataintegrity) {
         data = new StringByteIterator(buildDeterministicValue(key, fieldkey));
+      } else if (customfiledlength) {
+        /* xc 20170530 */
+        data = new RandomByteIterator(fieldMap.get(fieldkey));
       } else {
         // fill with random data
         data = new RandomByteIterator(fieldlengthgenerator.nextValue().longValue());
@@ -577,9 +683,10 @@ public class CoreWorkload extends Workload {
   }
 
   /**
-   * Do one insert operation. Because it will be called concurrently from multiple client threads,
-   * this function must be thread safe. However, avoid synchronized, or the threads will block waiting
-   * for each other, and it will be difficult to reach the target throughput. Ideally, this function would
+   * Do one insert operation. Because it will be called concurrently from
+   * multiple client threads, this function must be thread safe. However, avoid
+   * synchronized, or the threads will block waiting for each other, and it will
+   * be difficult to reach the target throughput. Ideally, this function would
    * have no side effects other than DB operations.
    */
   @Override
@@ -601,7 +708,8 @@ public class CoreWorkload extends Workload {
       if (++numOfRetries <= insertionRetryLimit) {
         System.err.println("Retrying insertion, retry count: " + numOfRetries);
         try {
-          // Sleep for a random number between [0.8, 1.2)*insertionRetryInterval.
+          // Sleep for a random number between [0.8,
+          // 1.2)*insertionRetryInterval.
           int sleepTime = (int) (1000 * insertionRetryInterval * (0.8 + 0.4 * Math.random()));
           Thread.sleep(sleepTime);
         } catch (InterruptedException e) {
@@ -609,8 +717,8 @@ public class CoreWorkload extends Workload {
         }
 
       } else {
-        System.err.println("Error inserting, not retrying any more. number of attempts: " + numOfRetries +
-            "Insertion Retry Limit: " + insertionRetryLimit);
+        System.err.println("Error inserting, not retrying any more. number of attempts: " + numOfRetries
+            + "Insertion Retry Limit: " + insertionRetryLimit);
         break;
 
       }
@@ -620,9 +728,10 @@ public class CoreWorkload extends Workload {
   }
 
   /**
-   * Do one transaction operation. Because it will be called concurrently from multiple client
-   * threads, this function must be thread safe. However, avoid synchronized, or the threads will block waiting
-   * for each other, and it will be difficult to reach the target throughput. Ideally, this function would
+   * Do one transaction operation. Because it will be called concurrently from
+   * multiple client threads, this function must be thread safe. However, avoid
+   * synchronized, or the threads will block waiting for each other, and it will
+   * be difficult to reach the target throughput. Ideally, this function would
    * have no side effects other than DB operations.
    */
   @Override
@@ -642,17 +751,16 @@ public class CoreWorkload extends Workload {
       break;
     default:
       doTransactionReadModifyWrite(db);
-    } 
+    }
 
     return true;
   }
 
   /**
-   * Results are reported in the first three buckets of the histogram under
-   * the label "VERIFY".
-   * Bucket 0 means the expected data was returned.
-   * Bucket 1 means incorrect data was returned.
-   * Bucket 2 means null data was returned when some data was expected.
+   * Results are reported in the first three buckets of the histogram under the
+   * label "VERIFY". Bucket 0 means the expected data was returned. Bucket 1
+   * means incorrect data was returned. Bucket 2 means null data was returned
+   * when some data was expected.
    */
   protected void verifyRow(String key, HashMap<String, ByteIterator> cells) {
     Status verifyStatus = Status.OK;
@@ -713,7 +821,7 @@ public class CoreWorkload extends Workload {
       verifyRow(keyname, cells);
     }
   }
-  
+
   public void doTransactionReadModifyWrite(DB db) {
     // choose a random key
     int keynum = nextKeynum();
@@ -743,7 +851,6 @@ public class CoreWorkload extends Workload {
     // do the transaction
 
     HashMap<String, ByteIterator> cells = new HashMap<String, ByteIterator>();
-
 
     long ist = _measurements.getIntendedtartTimeNs();
     long st = System.nanoTime();
@@ -817,29 +924,33 @@ public class CoreWorkload extends Workload {
   }
 
   /**
-   * Creates a weighted discrete values with database operations for a workload to perform.
-   * Weights/proportions are read from the properties list and defaults are used
-   * when values are not configured.
-   * Current operations are "READ", "UPDATE", "INSERT", "SCAN" and "READMODIFYWRITE".
-   * @param p The properties list to pull weights from.
-   * @return A generator that can be used to determine the next operation to perform.
-   * @throws IllegalArgumentException if the properties object was null.
+   * Creates a weighted discrete values with database operations for a workload
+   * to perform. Weights/proportions are read from the properties list and
+   * defaults are used when values are not configured. Current operations are
+   * "READ", "UPDATE", "INSERT", "SCAN" and "READMODIFYWRITE".
+   * 
+   * @param p
+   *          The properties list to pull weights from.
+   * @return A generator that can be used to determine the next operation to
+   *         perform.
+   * @throws IllegalArgumentException
+   *           if the properties object was null.
    */
   public static DiscreteGenerator createOperationGenerator(final Properties p) {
     if (p == null) {
       throw new IllegalArgumentException("Properties object cannot be null");
     }
-    final double readproportion = Double.parseDouble(
-        p.getProperty(READ_PROPORTION_PROPERTY, READ_PROPORTION_PROPERTY_DEFAULT));
-    final double updateproportion = Double.parseDouble(
-        p.getProperty(UPDATE_PROPORTION_PROPERTY, UPDATE_PROPORTION_PROPERTY_DEFAULT));
-    final double insertproportion = Double.parseDouble(
-        p.getProperty(INSERT_PROPORTION_PROPERTY, INSERT_PROPORTION_PROPERTY_DEFAULT));
-    final double scanproportion = Double.parseDouble(
-        p.getProperty(SCAN_PROPORTION_PROPERTY, SCAN_PROPORTION_PROPERTY_DEFAULT));
-    final double readmodifywriteproportion = Double.parseDouble(p.getProperty(
-        READMODIFYWRITE_PROPORTION_PROPERTY, READMODIFYWRITE_PROPORTION_PROPERTY_DEFAULT));
-    
+    final double readproportion = Double
+        .parseDouble(p.getProperty(READ_PROPORTION_PROPERTY, READ_PROPORTION_PROPERTY_DEFAULT));
+    final double updateproportion = Double
+        .parseDouble(p.getProperty(UPDATE_PROPORTION_PROPERTY, UPDATE_PROPORTION_PROPERTY_DEFAULT));
+    final double insertproportion = Double
+        .parseDouble(p.getProperty(INSERT_PROPORTION_PROPERTY, INSERT_PROPORTION_PROPERTY_DEFAULT));
+    final double scanproportion = Double
+        .parseDouble(p.getProperty(SCAN_PROPORTION_PROPERTY, SCAN_PROPORTION_PROPERTY_DEFAULT));
+    final double readmodifywriteproportion = Double
+        .parseDouble(p.getProperty(READMODIFYWRITE_PROPORTION_PROPERTY, READMODIFYWRITE_PROPORTION_PROPERTY_DEFAULT));
+
     final DiscreteGenerator operationchooser = new DiscreteGenerator();
     if (readproportion > 0) {
       operationchooser.addValue(readproportion, "READ");

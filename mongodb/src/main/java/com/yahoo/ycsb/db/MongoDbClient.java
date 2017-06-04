@@ -252,9 +252,18 @@ public class MongoDbClient extends DB {
   @Override
   public Status insert(String table, String key,
       HashMap<String, ByteIterator> values) {
-    try {
+    try {      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       MongoCollection<Document> collection = database.getCollection(table);
-      Document toInsert = new Document("_id", key);
+      Document toInsert = new Document("_id", format ? k : key);
+      
       for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
         toInsert.put(entry.getKey(), entry.getValue().toArray());
       }
@@ -317,8 +326,17 @@ public class MongoDbClient extends DB {
   public Status read(String table, String key, Set<String> fields,
       HashMap<String, ByteIterator> result) {
     try {
+      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       MongoCollection<Document> collection = database.getCollection(table);
-      Document query = new Document("_id", key);
+      Document query = new Document("_id", format ? k : key);
 
       FindIterable<Document> findIterable = collection.find(query);
 
@@ -365,9 +383,17 @@ public class MongoDbClient extends DB {
       Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
     MongoCursor<Document> cursor = null;
     try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(startkey);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       MongoCollection<Document> collection = database.getCollection(table);
 
-      Document scanRange = new Document("$gte", startkey);
+      Document scanRange = new Document("$gte", format ? k : startkey);
       Document query = new Document("_id", scanRange);
       Document sort = new Document("_id", INCLUDE);
 
@@ -429,10 +455,18 @@ public class MongoDbClient extends DB {
   @Override
   public Status update(String table, String key,
       HashMap<String, ByteIterator> values) {
-    try {
+    try {      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       MongoCollection<Document> collection = database.getCollection(table);
 
-      Document query = new Document("_id", key);
+      Document query = new Document("_id", format ? k : key);
       Document fieldsToSet = new Document();
       for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
         fieldsToSet.put(entry.getKey(), entry.getValue().toArray());
