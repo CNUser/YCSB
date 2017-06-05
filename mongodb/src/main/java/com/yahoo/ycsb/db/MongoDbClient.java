@@ -325,8 +325,7 @@ public class MongoDbClient extends DB {
   @Override
   public Status read(String table, String key, Set<String> fields,
       HashMap<String, ByteIterator> result) {
-    try {
-      
+    try {      
       int k = 0;
       boolean format = true;
       try {

@@ -251,11 +251,19 @@ public class AsyncMongoDbClient extends DB {
    */
   @Override
   public final Status insert(final String table, final String key,
-      final HashMap<String, ByteIterator> values) {
+      final HashMap<String, ByteIterator> values) {    
     try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       final MongoCollection collection = database.getCollection(table);
       final DocumentBuilder toInsert =
-          DOCUMENT_BUILDER.get().reset().add("_id", key);
+          DOCUMENT_BUILDER.get().reset().add("_id", format ? k : key);
       final Document query = toInsert.build();
       for (final Map.Entry<String, ByteIterator> entry : values.entrySet()) {
         toInsert.add(entry.getKey(), entry.getValue().toArray());
@@ -331,9 +339,17 @@ public class AsyncMongoDbClient extends DB {
   public final Status read(final String table, final String key,
       final Set<String> fields, final HashMap<String, ByteIterator> result) {
     try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       final MongoCollection collection = database.getCollection(table);
       final DocumentBuilder query =
-          DOCUMENT_BUILDER.get().reset().add("_id", key);
+          DOCUMENT_BUILDER.get().reset().add("_id", format ? k : key);
 
       Document queryResult = null;
       if (fields != null) {
@@ -391,13 +407,27 @@ public class AsyncMongoDbClient extends DB {
   public final Status scan(final String table, final String startkey,
       final int recordcount, final Set<String> fields,
       final Vector<HashMap<String, ByteIterator>> result) {
-    try {
-      final MongoCollection collection = database.getCollection(table);
-
-      final Find.Builder find =
-          Find.builder().query(where("_id").greaterThanOrEqualTo(startkey))
+    try {      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(startkey);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
+      final MongoCollection collection = database.getCollection(table);      
+      
+      Find.Builder find = null;
+      if (format) {
+        find = Find.builder().query(where("_id").greaterThanOrEqualTo(k))
               .limit(recordcount).batchSize(recordcount).sort(Sort.asc("_id"))
               .readPreference(readPreference);
+      } else {
+        find = Find.builder().query(where("_id").greaterThanOrEqualTo(startkey))
+            .limit(recordcount).batchSize(recordcount).sort(Sort.asc("_id"))
+            .readPreference(readPreference);
+      }
 
       if (fields != null) {
         final DocumentBuilder fieldsDoc = BuilderFactory.start();
@@ -452,8 +482,16 @@ public class AsyncMongoDbClient extends DB {
   public final Status update(final String table, final String key,
       final HashMap<String, ByteIterator> values) {
     try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       final MongoCollection collection = database.getCollection(table);
-      final DocumentBuilder query = BuilderFactory.start().add("_id", key);
+      final DocumentBuilder query = BuilderFactory.start().add("_id", format ? k : key);
       final DocumentBuilder update = BuilderFactory.start();
       final DocumentBuilder fieldsToSet = update.push("$set");
 
