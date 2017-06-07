@@ -252,10 +252,7 @@ public class MongoDbClient extends DB {
                 .withReadPreference(readPreference)
                 .withWriteConcern(writeConcern);
 
-        System.out.println("mongo client connection created with " + url);
-        
-        /* xc 20170607 */
-        dbcount = props.getProperty(MONGO_DBCOUNT_PROPERTY, MONGO_COL_COUNT_DEFAULT);
+        System.out.println("mongo client connection created with " + url);        
         
       } catch (Exception e1) {
         System.err
