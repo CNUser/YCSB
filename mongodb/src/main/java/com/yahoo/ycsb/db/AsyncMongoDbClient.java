@@ -142,8 +142,16 @@ public class AsyncMongoDbClient extends DB {
   @Override
   public final Status delete(final String table, final String key) {
     try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       final MongoCollection collection = database.getCollection(table);
-      final Document q = BuilderFactory.start().add("_id", key).build();
+      final Document q = BuilderFactory.start().add("_id", format ? k : key).build();
       final long res = collection.delete(q, writeConcern);
       if (res == 0) {
         System.err.println("Nothing deleted for key " + key);

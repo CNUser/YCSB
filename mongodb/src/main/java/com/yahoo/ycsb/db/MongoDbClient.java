@@ -110,6 +110,26 @@ public class MongoDbClient extends DB {
 
   /** The bulk inserts pending for the thread. */
   private final List<Document> bulkInserts = new ArrayList<Document>();
+  
+  /** xc 20170607 dbcount 解析mongodbcount */
+  private int dbcount = 0;
+  
+  /** xc 20170607 colcount 解析mongocolcount */
+  private int colcount = 0;
+  
+  /** xc 20170607 如果 mongodbcount = n 大于 1，dblist 存放 n-1 个对象*/
+  List<MongoDatabase> dblist = null;
+  
+  /** xc 20170607 如果 mongocolcount = n 大于 1， tablenames 存放 n-1 个 collection 的名字 */
+  List<String> tablenames = null;
+  
+  /** xc 20170607 */
+  private final String MONGO_DBCOUNT_PROPERTY = "mongodbcount";
+  private final String MONGO_DBCOUNT_DEFAULT = "1";
+  
+  /** xc 20170607 */
+  private final String MONGO_COL_COUNT_PROPERTY = "mongocolcount";
+  private final String MONGO_COL_COUNT_DEFAULT = "1";
 
   /**
    * Cleanup any state for this DB. Called once per DB instance; there is one DB
@@ -146,8 +166,16 @@ public class MongoDbClient extends DB {
   public Status delete(String table, String key) {
     try {
       MongoCollection<Document> collection = database.getCollection(table);
+      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
 
-      Document query = new Document("_id", key);
+      Document query = new Document("_id", format ? k : key);
       DeleteResult result =
           collection.withWriteConcern(writeConcern).deleteOne(query);
       if (result.wasAcknowledged() && result.getDeletedCount() == 0) {
@@ -225,6 +253,10 @@ public class MongoDbClient extends DB {
                 .withWriteConcern(writeConcern);
 
         System.out.println("mongo client connection created with " + url);
+        
+        /* xc 20170607 */
+        dbcount = props.getProperty(MONGO_DBCOUNT_PROPERTY, MONGO_COL_COUNT_DEFAULT);
+        
       } catch (Exception e1) {
         System.err
             .println("Could not initialize MongoDB connection pool for Loader: "
