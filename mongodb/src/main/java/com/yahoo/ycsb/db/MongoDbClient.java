@@ -48,8 +48,10 @@ import org.bson.types.Binary;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
 import java.util.Vector;
@@ -67,6 +69,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  *      driver</a>
  */
 public class MongoDbClient extends DB {
+
+  /** xc 20170607. */
+  private static final String MONGO_DBCOUNT_PROPERTY = "mongo.dbcount";
+  private static final String MONGO_DBCOUNT_DEFAULT = "1";
+
+  /** xc 20170607. */
+  private static final String MONGO_COL_COUNT_PROPERTY = "mongo.colcount";
+  private static final String MONGO_COL_COUNT_DEFAULT = "1";
 
   /** Used to include a field in a response. */
   private static final Integer INCLUDE = Integer.valueOf(1);
@@ -111,7 +121,19 @@ public class MongoDbClient extends DB {
   /** The bulk inserts pending for the thread. */
   private final List<Document> bulkInserts = new ArrayList<Document>();
   
+  /** xc 20170607 dbcount 解析mongodbcount. */
+  private static int dbcount = 0;
+
+  /** xc 20170607 colcount 解析mongocolcount. */
+  private static int colcount = 0;
+
+  /** xc 20170607 如果 mongodbcount = n 大于 1，dblist 存放 n-1 个对象. */
+  private static Map<String, MongoDatabase> dbMap =  new HashMap<>();
+
+  /** xc 20170607 如果 mongocolcount = n 大于 1， tablenames 存放 n-1 个 collection 的名字. */
+  private static Set<String> tablenames = new HashSet<String>();
   
+//  private static Map<String, MongoCollection<Document>> colMap = new HashMap<>();
 
   /**
    * Cleanup any state for this DB. Called once per DB instance; there is one DB
@@ -146,9 +168,7 @@ public class MongoDbClient extends DB {
    */
   @Override
   public Status delete(String table, String key) {
-    try {
-      MongoCollection<Document> collection = database.getCollection(table);
-      
+    try {      
       int k = 0;
       boolean format = true;
       try {
@@ -156,19 +176,39 @@ public class MongoDbClient extends DB {
       } catch (NumberFormatException e) {
         format = false;
       }
+      
+      MongoCollection<Document> collectio = database.getCollection(table);
+      List<MongoCollection<Document>> list = new ArrayList<>();
+      list.add(collectio);
+      
+      if (dbcount > 1) {
+        for (Entry<String, MongoDatabase> entry : dbMap.entrySet()) {
+          MongoCollection<Document> col = entry.getValue().getCollection(table);
+          list.add(col);
+        }
+      } else if (colcount > 1) {
+        for (String name : tablenames) {
+          MongoCollection<Document> col = database.getCollection(name);
+          list.add(col);
+        }
+      }
 
       Document query = new Document("_id", format ? k : key);
-      DeleteResult result =
-          collection.withWriteConcern(writeConcern).deleteOne(query);
-      if (result.wasAcknowledged() && result.getDeletedCount() == 0) {
-        System.err.println("Nothing deleted for key " + key);
-        return Status.NOT_FOUND;
+      
+      for (MongoCollection<Document> collection : list) {
+        DeleteResult result = collection.withWriteConcern(writeConcern).deleteOne(query);
+        if (result.wasAcknowledged() && result.getDeletedCount() == 0) {
+          System.err.println("Nothing deleted for key " + key);
+          return Status.NOT_FOUND;
+        }
       }
+      
       return Status.OK;
     } catch (Exception e) {
       System.err.println(e.toString());
       return Status.ERROR;
     }
+  
   }
 
   /**
@@ -236,6 +276,38 @@ public class MongoDbClient extends DB {
 
         System.out.println("mongo client connection created with " + url);         
         
+        /* xc 20170607 */
+        dbcount = Integer.parseInt(props.getProperty(MONGO_DBCOUNT_PROPERTY, MONGO_DBCOUNT_DEFAULT));
+        colcount = Integer.parseInt(props.getProperty(MONGO_COL_COUNT_PROPERTY, MONGO_COL_COUNT_DEFAULT));
+        
+        System.out.println("\nMongo init\n");
+        
+        /* 如果 dbcount > 1, 则为生成多个 DB 对象，每个 DB 对应一个 Collection 
+         * 如果 dbcount = 1, colcount > 1, 则为一个 DB 对应 dbcount 个 collection
+         * */
+        if (dbcount > 1) {
+          // String tablename = props.getProperty("table", "usertable");          
+          int cnt = 1;
+          while (cnt < dbcount) {
+            String dbname = databaseName + cnt;
+            MongoDatabase db = mongoClient.getDatabase(dbname)
+                .withReadPreference(readPreference)
+                .withWriteConcern(writeConcern);
+            
+            dbMap.put(dbname, db);            
+            cnt++;
+          }
+        } else if (colcount > 1) {                   
+          String tablename = props.getProperty("table", "usertable");
+          
+          int cnt = 1;
+          while (cnt < colcount) {
+            String name = tablename + cnt;
+            tablenames.add(name);            
+            cnt++;
+          }
+        }
+        
       } catch (Exception e1) {
         System.err
             .println("Could not initialize MongoDB connection pool for Loader: "
@@ -263,7 +335,7 @@ public class MongoDbClient extends DB {
   @Override
   public Status insert(String table, String key,
       HashMap<String, ByteIterator> values) {
-    try {      
+    try {
       int k = 0;
       boolean format = true;
       try {
@@ -273,6 +345,343 @@ public class MongoDbClient extends DB {
       }
       
       MongoCollection<Document> collection = database.getCollection(table);
+      List<MongoCollection<Document>> list = new ArrayList<>();
+      list.add(collection);
+      
+      if (dbcount > 1) {
+        for (Entry<String, MongoDatabase> entry : dbMap.entrySet()) {
+          MongoCollection<Document> col = entry.getValue().getCollection(table);
+          list.add(col);
+        }
+      } else if (colcount > 1) {
+        for (String name : tablenames) {
+          MongoCollection<Document> col = database.getCollection(name);
+          list.add(col);
+        }
+      }
+      
+      Document toInsert = new Document("_id", format ? k : key);
+      
+      for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
+        toInsert.put(entry.getKey(), entry.getValue().toArray());
+      }
+
+      if (batchSize == 1) {
+        if (useUpsert) {
+          // this is effectively an insert, but using an upsert instead due
+          // to current inability of the framework to clean up after itself
+          // between test runs.
+          for (int i = 0; i < list.size(); i++) {
+            list.get(i).replaceOne(new Document("_id", toInsert.get("_id")),
+                toInsert, UPDATE_WITH_UPSERT);
+          }
+          
+          /* 
+          collection.replaceOne(new Document("_id", toInsert.get("_id")),
+              toInsert, UPDATE_WITH_UPSERT);
+          */
+        } else {
+          for (int i = 0; i < list.size(); i++) {
+            list.get(i).insertOne(toInsert);
+          }
+          /* collection.insertOne(toInsert); */
+        }
+      } else {
+        bulkInserts.add(toInsert);
+        if (bulkInserts.size() == batchSize) {
+          if (useUpsert) {
+            List<UpdateOneModel<Document>> updates = 
+                new ArrayList<UpdateOneModel<Document>>(bulkInserts.size());
+            for (Document doc : bulkInserts) {
+              updates.add(new UpdateOneModel<Document>(
+                  new Document("_id", doc.get("_id")),
+                  doc, UPDATE_WITH_UPSERT));
+            }
+            for (int i = 0; i < list.size(); i++) {
+              list.get(i).bulkWrite(updates);
+            }
+            /* collection.bulkWrite(updates); */
+          } else {
+            for (int i = 0; i < list.size(); i++) {
+              list.get(i).insertMany(bulkInserts, INSERT_UNORDERED);
+            }
+            /* collection.insertMany(bulkInserts, INSERT_UNORDERED); */
+          }
+          bulkInserts.clear();
+        } else {
+          return Status.BATCHED_OK;
+        }
+      }
+      return Status.OK;
+    } catch (Exception e) {
+      System.err.println("Exception while trying bulk insert with "
+          + bulkInserts.size());
+      e.printStackTrace();
+      return Status.ERROR;
+    }
+  }
+
+  /**
+   * Read a record from the database. Each field/value pair from the result will
+   * be stored in a HashMap.
+   * 
+   * @param table
+   *          The name of the table
+   * @param key
+   *          The record key of the record to read.
+   * @param fields
+   *          The list of fields to read, or null for all of them
+   * @param result
+   *          A HashMap of field/value pairs for the result
+   * @return Zero on success, a non-zero error code on error or "not found".
+   */
+  @Override
+  public Status read(String table, String key, Set<String> fields,
+      HashMap<String, ByteIterator> result) {    
+    try {      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }      
+
+      /*  xc 20170608 照顾下面的 collection 少改动*/
+      MongoCollection<Document> collectio = database.getCollection(table);
+      List<MongoCollection<Document>> list = new ArrayList<>();
+      list.add(collectio);
+      
+      if (dbcount > 1) {
+        for (Entry<String, MongoDatabase> entry : dbMap.entrySet()) {
+          MongoCollection<Document> col = entry.getValue().getCollection(table);
+          list.add(col);
+        }
+      } else if (colcount > 1) {
+        for (String name : tablenames) {
+          MongoCollection<Document> col = database.getCollection(name);
+          list.add(col);
+        }
+      }
+      
+      Document query = new Document("_id", format ? k : key);
+
+      for (MongoCollection<Document> collection : list) {
+        FindIterable<Document> findIterable = collection.find(query);
+
+        if (fields != null) {
+          Document projection = new Document();
+          for (String field : fields) {
+            projection.put(field, INCLUDE);
+          }
+          findIterable.projection(projection);
+        }
+
+        Document queryResult = findIterable.first();
+
+        if (queryResult != null) {
+          fillMap(result, queryResult);
+        }
+        
+        if (queryResult == null) {
+          return Status.NOT_FOUND;
+        }
+        /* return queryResult != null ? Status.OK : Status.NOT_FOUND; */
+      }
+      
+      return Status.OK;
+    } catch (Exception e) {
+      System.err.println(e.toString());
+      return Status.ERROR;
+    }
+  }
+
+  /**
+   * Perform a range scan for a set of records in the database. Each field/value
+   * pair from the result will be stored in a HashMap.
+   * 
+   * @param table
+   *          The name of the table
+   * @param startkey
+   *          The record key of the first record to read.
+   * @param recordcount
+   *          The number of records to read
+   * @param fields
+   *          The list of fields to read, or null for all of them
+   * @param result
+   *          A Vector of HashMaps, where each HashMap is a set field/value
+   *          pairs for one record
+   * @return Zero on success, a non-zero error code on error. See the {@link DB}
+   *         class's description for a discussion of error codes.
+   */
+  @Override
+  public Status scan(String table, String startkey, int recordcount,
+      Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
+    MongoCursor<Document> cursor = null;
+    try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(startkey);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
+      MongoCollection<Document> collectio = database.getCollection(table);
+      List<MongoCollection<Document>> list = new ArrayList<>();
+      list.add(collectio);
+      
+      if (dbcount > 1) {
+        for (Entry<String, MongoDatabase> entry : dbMap.entrySet()) {
+          MongoCollection<Document> col = entry.getValue().getCollection(table);
+          list.add(col);
+        }
+      } else if (colcount > 1) {
+        for (String name : tablenames) {
+          MongoCollection<Document> col = database.getCollection(name);
+          list.add(col);
+        }
+      }      
+      
+      Document scanRange = new Document("$gte", format ? k : startkey);
+      Document query = new Document("_id", scanRange);
+      Document sort = new Document("_id", INCLUDE);
+
+      for (MongoCollection<Document> collection : list) {
+        FindIterable<Document> findIterable =
+            collection.find(query).sort(sort).limit(recordcount);
+
+        if (fields != null) {
+          Document projection = new Document();
+          for (String fieldName : fields) {
+            projection.put(fieldName, INCLUDE);
+          }
+          findIterable.projection(projection);
+        }
+
+        cursor = findIterable.iterator();
+
+        if (!cursor.hasNext()) {
+          System.err.println("Nothing found in scan for key " + startkey);
+          return Status.ERROR;
+        }
+
+        result.ensureCapacity(recordcount);
+
+        while (cursor.hasNext()) {
+          HashMap<String, ByteIterator> resultMap =
+              new HashMap<String, ByteIterator>();
+
+          Document obj = cursor.next();
+          fillMap(resultMap, obj);
+
+          result.add(resultMap);
+        }
+      }
+
+      return Status.OK;
+    } catch (Exception e) {
+      System.err.println(e.toString());
+      return Status.ERROR;
+    } finally {
+      if (cursor != null) {
+        cursor.close();
+      }
+    }
+  }
+
+  /**
+   * Update a record in the database. Any field/value pairs in the specified
+   * values HashMap will be written into the record with the specified record
+   * key, overwriting any existing values with the same field name.
+   * 
+   * @param table
+   *          The name of the table
+   * @param key
+   *          The record key of the record to write.
+   * @param values
+   *          A HashMap of field/value pairs to update in the record
+   * @return Zero on success, a non-zero error code on error. See this class's
+   *         description for a discussion of error codes.
+   */
+  @Override
+  public Status update(String table, String key,
+      HashMap<String, ByteIterator> values) {
+    try {      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }      
+
+      MongoCollection<Document> collectio = database.getCollection(table);
+      List<MongoCollection<Document>> list = new ArrayList<>();
+      list.add(collectio);
+      
+      if (dbcount > 1) {
+        for (Entry<String, MongoDatabase> entry : dbMap.entrySet()) {
+          MongoCollection<Document> col = entry.getValue().getCollection(table);
+          list.add(col);
+        }
+      } else if (colcount > 1) {
+        for (String name : tablenames) {
+          MongoCollection<Document> col = database.getCollection(name);
+          list.add(col);
+        }
+      }    
+      
+      Document query = new Document("_id", format ? k : key);
+      Document fieldsToSet = new Document();
+      for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
+        fieldsToSet.put(entry.getKey(), entry.getValue().toArray());
+      }
+      Document update = new Document("$set", fieldsToSet);
+
+      for (MongoCollection<Document> collection : list) {
+        UpdateResult result = collection.updateOne(query, update);
+        if (result.wasAcknowledged() && result.getMatchedCount() == 0) {
+          System.err.println("Nothing updated for key " + key + collection.getNamespace().toString());
+          return Status.NOT_FOUND;
+        }
+      }
+      
+      return Status.OK;
+    } catch (Exception e) {
+      System.err.println(e.toString());
+      return Status.ERROR;
+    }
+  }
+
+  /**
+   * Fills the map with the values from the DBObject.
+   * 
+   * @param resultMap
+   *          The map to fill/
+   * @param obj
+   *          The object to copy values from.
+   */
+  protected void fillMap(Map<String, ByteIterator> resultMap, Document obj) {
+    for (Map.Entry<String, Object> entry : obj.entrySet()) {
+      if (entry.getValue() instanceof Binary) {
+        resultMap.put(entry.getKey(),
+            new ByteArrayByteIterator(((Binary) entry.getValue()).getData()));
+      }
+    }
+  }
+  
+  private Status insert2OtherCollections(MongoCollection<Document> collection, String key,
+      HashMap<String, ByteIterator> values) {
+    try {
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
+      }
+      
       Document toInsert = new Document("_id", format ? k : key);
       
       for (Map.Entry<String, ByteIterator> entry : values.entrySet()) {
@@ -316,25 +725,9 @@ public class MongoDbClient extends DB {
       e.printStackTrace();
       return Status.ERROR;
     }
-
   }
-
-  /**
-   * Read a record from the database. Each field/value pair from the result will
-   * be stored in a HashMap.
-   * 
-   * @param table
-   *          The name of the table
-   * @param key
-   *          The record key of the record to read.
-   * @param fields
-   *          The list of fields to read, or null for all of them
-   * @param result
-   *          A HashMap of field/value pairs for the result
-   * @return Zero on success, a non-zero error code on error or "not found".
-   */
-  @Override
-  public Status read(String table, String key, Set<String> fields,
+  
+  private Status readOtherCollections(MongoCollection<Document> collection, String key, Set<String> fields,
       HashMap<String, ByteIterator> result) {
     try {      
       int k = 0;
@@ -345,7 +738,6 @@ public class MongoDbClient extends DB {
         format = false;
       }
       
-      MongoCollection<Document> collection = database.getCollection(table);
       Document query = new Document("_id", format ? k : key);
 
       FindIterable<Document> findIterable = collection.find(query);
@@ -369,27 +761,8 @@ public class MongoDbClient extends DB {
       return Status.ERROR;
     }
   }
-
-  /**
-   * Perform a range scan for a set of records in the database. Each field/value
-   * pair from the result will be stored in a HashMap.
-   * 
-   * @param table
-   *          The name of the table
-   * @param startkey
-   *          The record key of the first record to read.
-   * @param recordcount
-   *          The number of records to read
-   * @param fields
-   *          The list of fields to read, or null for all of them
-   * @param result
-   *          A Vector of HashMaps, where each HashMap is a set field/value
-   *          pairs for one record
-   * @return Zero on success, a non-zero error code on error. See the {@link DB}
-   *         class's description for a discussion of error codes.
-   */
-  @Override
-  public Status scan(String table, String startkey, int recordcount,
+  
+  private Status scanOtherCollectios(MongoCollection<Document> collection, String startkey, int recordcount,
       Set<String> fields, Vector<HashMap<String, ByteIterator>> result) {
     MongoCursor<Document> cursor = null;
     try {
@@ -401,8 +774,6 @@ public class MongoDbClient extends DB {
         format = false;
       }
       
-      MongoCollection<Document> collection = database.getCollection(table);
-
       Document scanRange = new Document("$gte", format ? k : startkey);
       Document query = new Document("_id", scanRange);
       Document sort = new Document("_id", INCLUDE);
@@ -447,23 +818,8 @@ public class MongoDbClient extends DB {
       }
     }
   }
-
-  /**
-   * Update a record in the database. Any field/value pairs in the specified
-   * values HashMap will be written into the record with the specified record
-   * key, overwriting any existing values with the same field name.
-   * 
-   * @param table
-   *          The name of the table
-   * @param key
-   *          The record key of the record to write.
-   * @param values
-   *          A HashMap of field/value pairs to update in the record
-   * @return Zero on success, a non-zero error code on error. See this class's
-   *         description for a discussion of error codes.
-   */
-  @Override
-  public Status update(String table, String key,
+  
+  private Status updateOtherCollections(MongoCollection<Document> collection, String key,
       HashMap<String, ByteIterator> values) {
     try {      
       int k = 0;
@@ -472,9 +828,7 @@ public class MongoDbClient extends DB {
         k = Integer.parseInt(key);
       } catch (NumberFormatException e) {
         format = false;
-      }
-      
-      MongoCollection<Document> collection = database.getCollection(table);
+      }      
 
       Document query = new Document("_id", format ? k : key);
       Document fieldsToSet = new Document();
@@ -494,21 +848,28 @@ public class MongoDbClient extends DB {
       return Status.ERROR;
     }
   }
-
-  /**
-   * Fills the map with the values from the DBObject.
-   * 
-   * @param resultMap
-   *          The map to fill/
-   * @param obj
-   *          The object to copy values from.
-   */
-  protected void fillMap(Map<String, ByteIterator> resultMap, Document obj) {
-    for (Map.Entry<String, Object> entry : obj.entrySet()) {
-      if (entry.getValue() instanceof Binary) {
-        resultMap.put(entry.getKey(),
-            new ByteArrayByteIterator(((Binary) entry.getValue()).getData()));
+  
+  private Status deleteOtherCollections(MongoCollection<Document> collection, String key) {
+    try {      
+      int k = 0;
+      boolean format = true;
+      try {
+        k = Integer.parseInt(key);
+      } catch (NumberFormatException e) {
+        format = false;
       }
+
+      Document query = new Document("_id", format ? k : key);
+      DeleteResult result =
+          collection.withWriteConcern(writeConcern).deleteOne(query);
+      if (result.wasAcknowledged() && result.getDeletedCount() == 0) {
+        System.err.println("Nothing deleted for key " + key);
+        return Status.NOT_FOUND;
+      }
+      return Status.OK;
+    } catch (Exception e) {
+      System.err.println(e.toString());
+      return Status.ERROR;
     }
   }
 }
